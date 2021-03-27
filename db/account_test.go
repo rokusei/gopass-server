@@ -2,6 +2,8 @@ package db_test
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"regexp"
 	"testing"
 	"time"
@@ -38,26 +40,30 @@ func Test_CreateUser(t *testing.T) {
 	for _, test := range testCases {
 		authHash, _, _, err := gopass.GenerateAuthEncHashes(test.masterPass)
 		require.NoError(t, err)
-		//
+
+		h := sha512.New()
+		h.Write([]byte(test.email))
+		emailHash := hex.EncodeToString(h.Sum(nil))
+
 		//mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(
 			`SELECT * FROM "users"
-		WHERE Email = $1 AND "users"."deleted_at" IS NULL LIMIT 1`)).
-			WithArgs(test.email).
+		WHERE EmailHash = $1 AND "users"."deleted_at" IS NULL LIMIT 1`)).
+			WithArgs(emailHash).
 			WillReturnRows(sqlmock.NewRows([]string{}))
 
 		mock.ExpectQuery(regexp.QuoteMeta(
 			`INSERT INTO "vaults" ("created_at","updated_at","deleted_at") VALUES ($1,$2,$3) RETURNING "id"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"123"}))
 		mock.ExpectQuery(regexp.QuoteMeta(
-			`INSERT INTO "users" ("created_at","updated_at","deleted_at","uuid","email","auth_hash_hash","vault_id") 
+			`INSERT INTO "users" ("created_at","updated_at","deleted_at","uuid","email_hash","auth_hash_hash","vault_id") 
 			VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING "id"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"a", "b", "c"}))
 		mock.ExpectCommit()
 
 		u, err := db.CreateUser(context.Background(), gdb, test.email, authHash)
 		require.NoError(t, err)
-		require.Equal(t, test.email, u.Email)
+		require.Equal(t, emailHash, u.EmailHash)
 		err = bcrypt.CompareHashAndPassword(u.AuthHashHash, authHash)
 		require.NoError(t, err)
 	}
@@ -100,17 +106,21 @@ func Test_GetUser(t *testing.T) {
 		authHash, _, _, err := gopass.GenerateAuthEncHashes(test.masterPass)
 		require.NoError(t, err)
 
+		h := sha512.New()
+		h.Write([]byte(test.email))
+		emailHash := hex.EncodeToString(h.Sum(nil))
+
 		// Create User Queries
 		mock.ExpectQuery(regexp.QuoteMeta(
 			`SELECT * FROM "users"
-		WHERE Email = $1 AND "users"."deleted_at" IS NULL LIMIT 1`)).
-			WithArgs(test.email).
+		WHERE EmailHash = $1 AND "users"."deleted_at" IS NULL LIMIT 1`)).
+			WithArgs(emailHash).
 			WillReturnRows(sqlmock.NewRows([]string{}))
 		mock.ExpectQuery(regexp.QuoteMeta(
 			`INSERT INTO "vaults" ("created_at","updated_at","deleted_at") VALUES ($1,$2,$3) RETURNING "id"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"123"}))
 		mock.ExpectQuery(regexp.QuoteMeta(
-			`INSERT INTO "users" ("created_at","updated_at","deleted_at","uuid","email","auth_hash_hash","vault_id") 
+			`INSERT INTO "users" ("created_at","updated_at","deleted_at","uuid","email_hash","auth_hash_hash","vault_id") 
 			VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING "id"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"1"}))
 
@@ -120,12 +130,12 @@ func Test_GetUser(t *testing.T) {
 		authHashHash, _ := bcrypt.GenerateFromPassword(authHash, bcrypt.DefaultCost)
 		mock.ExpectQuery(regexp.QuoteMeta(
 			`SELECT * FROM "users"
-			WHERE Email = $1 AND "users"."deleted_at" IS NULL LIMIT 1`)).
-			WithArgs(test.email).
-			WillReturnRows(sqlmock.NewRows([]string{"uuid", "email", "auth_hash_hash"}).AddRow("123", test.email, authHashHash))
+			WHERE EmailHash = $1 AND "users"."deleted_at" IS NULL LIMIT 1`)).
+			WithArgs(emailHash).
+			WillReturnRows(sqlmock.NewRows([]string{"uuid", "email_hash", "auth_hash_hash"}).AddRow("123", emailHash, authHashHash))
 		u, err := db.GetUser(context.Background(), gdb, test.email, authHash)
 		require.NoError(t, err)
-		require.Equal(t, test.email, u.Email)
+		require.Equal(t, emailHash, u.EmailHash)
 		err = bcrypt.CompareHashAndPassword(u.AuthHashHash, authHash)
 		require.NoError(t, err)
 	}

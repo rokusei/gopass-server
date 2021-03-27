@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"crypto/rand"
+	"crypto/sha512"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -24,7 +25,7 @@ const AuthHashSize = 64
 type User struct {
 	gorm.Model
 	UUID         string `gorm:"primaryKey"`
-	Email        string
+	EmailHash    string
 	AuthHashHash []byte
 	VaultID      uint
 	Vault        Vault
@@ -57,9 +58,13 @@ func CreateUser(ctx context.Context, db *gorm.DB, email string, authenticationHa
 		return User{}, InvalidAuthHash
 	}
 
+	h := sha512.New()
+	h.Write([]byte(email))
+	emailHash := hex.EncodeToString(h.Sum(nil))
+
 	// check if user with this email exists
 	u := User{}
-	result := db.Where("Email = ?", email).Limit(1).Find(&u)
+	result := db.Where("EmailHash = ?", emailHash).Limit(1).Find(&u)
 	if result.Error != nil {
 		return User{}, result.Error
 	}
@@ -82,7 +87,7 @@ func CreateUser(ctx context.Context, db *gorm.DB, email string, authenticationHa
 	authHashHash, _ := bcrypt.GenerateFromPassword(authenticationHash, bcrypt.DefaultCost)
 	user := User{
 		UUID:         userUUID,
-		Email:        email,
+		EmailHash:    emailHash,
 		AuthHashHash: authHashHash,
 		VaultID:      vault.ID,
 	}
@@ -102,8 +107,11 @@ func GetUser(ctx context.Context, db *gorm.DB, email string, authenticationHash 
 		return User{}, err
 	}
 
+	h := sha512.New()
+	h.Write([]byte(email))
+	emailHash := hex.EncodeToString(h.Sum(nil))
 	user := User{}
-	result := db.Where("Email = ?", email).Limit(1).Find(&user)
+	result := db.Where("EmailHash = ?", emailHash).Limit(1).Find(&user)
 	if result.Error != nil {
 		return User{}, result.Error
 	}
