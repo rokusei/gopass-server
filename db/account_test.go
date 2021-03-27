@@ -2,8 +2,6 @@ package db_test
 
 import (
 	"context"
-	"crypto/sha512"
-	"encoding/hex"
 	"regexp"
 	"testing"
 	"time"
@@ -41,9 +39,7 @@ func Test_CreateUser(t *testing.T) {
 		authHash, _, _, err := gopass.GenerateAuthEncHashes(test.masterPass)
 		require.NoError(t, err)
 
-		h := sha512.New()
-		h.Write([]byte(test.email))
-		emailHash := hex.EncodeToString(h.Sum(nil))
+		emailHash := db.StringToEncodedHash(test.email)
 
 		//mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(
@@ -106,9 +102,7 @@ func Test_GetUser(t *testing.T) {
 		authHash, _, _, err := gopass.GenerateAuthEncHashes(test.masterPass)
 		require.NoError(t, err)
 
-		h := sha512.New()
-		h.Write([]byte(test.email))
-		emailHash := hex.EncodeToString(h.Sum(nil))
+		emailHash := db.StringToEncodedHash(test.email)
 
 		// Create User Queries
 		mock.ExpectQuery(regexp.QuoteMeta(

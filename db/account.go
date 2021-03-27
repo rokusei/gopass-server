@@ -58,11 +58,8 @@ func CreateUser(ctx context.Context, db *gorm.DB, email string, authenticationHa
 		return User{}, InvalidAuthHash
 	}
 
-	h := sha512.New()
-	h.Write([]byte(email))
-	emailHash := hex.EncodeToString(h.Sum(nil))
-
 	// check if user with this email exists
+	emailHash := StringToEncodedHash(email)
 	u := User{}
 	result := db.Where("EmailHash = ?", emailHash).Limit(1).Find(&u)
 	if result.Error != nil {
@@ -107,11 +104,8 @@ func GetUser(ctx context.Context, db *gorm.DB, email string, authenticationHash 
 		return User{}, err
 	}
 
-	h := sha512.New()
-	h.Write([]byte(email))
-	emailHash := hex.EncodeToString(h.Sum(nil))
 	user := User{}
-	result := db.Where("EmailHash = ?", emailHash).Limit(1).Find(&user)
+	result := db.Where("EmailHash = ?", StringToEncodedHash(email)).Limit(1).Find(&user)
 	if result.Error != nil {
 		return User{}, result.Error
 	}
@@ -126,4 +120,10 @@ func GetUser(ctx context.Context, db *gorm.DB, email string, authenticationHash 
 		return User{}, err
 	}
 	return user, nil
+}
+
+func StringToEncodedHash(email string) string {
+	h := sha512.New()
+	h.Write([]byte(email))
+	return hex.EncodeToString(h.Sum(nil))
 }
