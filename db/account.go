@@ -1,4 +1,4 @@
-package gopass_server
+package db
 
 import (
 	"context"
@@ -11,8 +11,9 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrUserAlreadyExists = errors.New("user already exists")
-var ErrInvalidAuthHash = errors.New("invalid AuthenticationHash")
+var UserAlreadyExists = errors.New("user already exists")
+var UserDoesNotExist = errors.New("user does not exist")
+var InvalidAuthHash = errors.New("invalid AuthenticationHash")
 
 const GenerateUUIDRetries = 10
 const AuthHashSize = 64
@@ -25,6 +26,7 @@ type User struct {
 	UUID         string `gorm:"primaryKey"`
 	Email        string
 	AuthHashHash []byte
+	VaultID      uint
 	Vault        Vault
 }
 
@@ -46,15 +48,23 @@ func GenerateUUID() (string, error) {
 //      1) the AuthenticationHash has a large random salt already prepended
 //      2) we're hashing a 101,102 iteration PBKDF2 hash, so good luck creating a rainbow table of those
 func CreateUser(ctx context.Context, db *gorm.DB, email string, authenticationHash []byte) (User, error) {
+	if err := ctx.Err(); err != nil {
+		return User{}, err
+	}
+
 	// check if authHash is right size
 	if len(authenticationHash) != AuthHashSize {
-		return User{}, ErrInvalidAuthHash
+		return User{}, InvalidAuthHash
 	}
 
 	// check if user with this email exists
-	result := db.First(&User{}).Where("Email = ?", email)
-	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return User{}, ErrUserAlreadyExists
+	u := User{}
+	result := db.Where("Email = ?", email).Limit(1).Find(&u)
+	if result.Error != nil {
+		return User{}, result.Error
+	}
+	if u.UUID != "" {
+		return User{}, UserAlreadyExists
 	}
 
 	// generate a UUID for the user
@@ -63,29 +73,43 @@ func CreateUser(ctx context.Context, db *gorm.DB, email string, authenticationHa
 		return User{}, err
 	}
 
+	vault := Vault{
+		Entries: make([]VaultEntry, 0),
+	}
+	result = db.Create(&vault)
+
 	// generate hash of the users authenticationHash using MaxCost
-	authHashHash, _ := bcrypt.GenerateFromPassword(authenticationHash, bcrypt.MaxCost)
+	authHashHash, _ := bcrypt.GenerateFromPassword(authenticationHash, bcrypt.DefaultCost)
 	user := User{
 		UUID:         userUUID,
 		Email:        email,
 		AuthHashHash: authHashHash,
-		Vault:        Vault{},
+		VaultID:      vault.ID,
 	}
 
-	// create user, commit changes
-	result = db.Create(user).Commit()
+	// create user
+	result = db.Create(&user)
 	if result.Error != nil {
 		return User{}, result.Error
 	}
+	db.Commit()
 	return user, nil
 }
 
 // Fetch a reference to a user, requires authentication of the user's AuthenticationHash
-func GetUser(ctx context.Context, db *gorm.DB, id uint64, authenticationHash []byte) (User, error) {
-	var user User
-	result := db.First(user, id)
+func GetUser(ctx context.Context, db *gorm.DB, email string, authenticationHash []byte) (User, error) {
+	if err := ctx.Err(); err != nil {
+		return User{}, err
+	}
+
+	user := User{}
+	result := db.Where("Email = ?", email).Limit(1).Find(&user)
 	if result.Error != nil {
 		return User{}, result.Error
+	}
+
+	if len(user.AuthHashHash) < 1 || user.UUID == "" {
+		return user, UserDoesNotExist
 	}
 
 	// verify user's authentication hash
