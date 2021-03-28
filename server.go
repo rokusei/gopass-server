@@ -1,1 +1,0 @@
-package gopass_server
